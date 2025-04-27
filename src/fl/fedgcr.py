@@ -17,6 +17,9 @@ class FedGCRServer(BaseServer):
         self.h_t = {key: torch.zeros_like(value, device=self.device).float() for key, value in model.state_dict().items()}
         self.gamma = self.params.gamma
 
+        self.flag = 1
+        logging.info(f"FedGCRServer: flag={self.flag}")
+
     def second_correct(self, delta, client_id, model_version, key):
         # 如果是bn层，直接返回
         if model_version == 0 or 'bn' in key or 'downsample' in key:
@@ -31,36 +34,40 @@ class FedGCRServer(BaseServer):
         alpha = torch.dot(g_vec, g_vec)
         scale = beta / alpha
         select = 0
-        if scale > 1:
-            select = 1
-            res_vec = d_vec - g_vec
-        else:
-            select = 2
-            res_vec = d_vec - scale * g_vec
 
+        # First
+        if self.flag == 1:
+            if scale > 1:
+                select = 1
+                res_vec = d_vec - g_vec
+            else:
+                select = 2
+                res_vec = d_vec - scale * g_vec
         
         # Second
-        # if scale > 1:
-        #     select = 1
-        #     res_vec = d_vec
-        # else:
-        #     if scale > 0:
-        #         select = 2
-        #         res_vec = d_vec + g_vec
-        #     else:
-        #         select = 3
-        #         res_vec = d_vec - scale * g_vec + g_vec
+        elif self.flag == 2:
+            if scale > 1:
+                select = 1
+                res_vec = d_vec
+            else:
+                if scale > 0:
+                    select = 2
+                    res_vec = d_vec + g_vec
+                else:
+                    select = 3
+                    res_vec = d_vec - scale * g_vec + g_vec
 
         # Third
-        # if scale > 1:
-        #     select = 1
-        #     res_vec = d_vec - g_vec
-        # elif scale < 0 and alpha > 1e-5:
-        #         select = 2
-        #         res_vec = d_vec - scale * g_vec
-        # else:
-        #     select = 3
-        #     res_vec = d_vec + g_vec
+        elif self.flag == 3:
+            if scale > 1:
+                select = 1
+                res_vec = d_vec - g_vec
+            elif scale < 0 and alpha > 1e-5:
+                    select = 2
+                    res_vec = d_vec - scale * g_vec
+            else:
+                select = 3
+                res_vec = d_vec + g_vec
 
         logging.info(f"{key}: selected={select} alpha={alpha.item():.3e}, beta={beta.item():.3e}, scale={scale.item():.3f}")
         return res_vec.view_as(delta)
