@@ -1,0 +1,10 @@
+output/*
+data/*
+*.pyc
+.bak/*
+src/fl/history_try/*
+src/config/.bak
+*.ipynb
+Record.md
+src/fl/fedgcrold.py
+src/fl/fedgcrbak2.py
