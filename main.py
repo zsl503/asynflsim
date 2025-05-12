@@ -61,7 +61,7 @@ def main(params:BaseExperimentParams, output_dir:str):
      test_client_datasets) = \
         DataHandler.load_data(
         dataset_name = params.dataset_name, 
-        file_dir = params.dataset_dir,
+        file_dir = os.path.join(params.dataset_dir, params.dataset_name),
         args = params.dataset_args,
         center_test = False
     )
@@ -69,7 +69,7 @@ def main(params:BaseExperimentParams, output_dir:str):
     # 加载测试数据集
     test_dataset = DataHandler.load_data(
         dataset_name = params.dataset_name, 
-        file_dir = params.dataset_dir,
+        file_dir = os.path.join(params.dataset_dir, params.dataset_name),
         args = params.dataset_args,
         center_test=True
     )
@@ -210,69 +210,121 @@ def gen_speed_factor(data_dir, lda=0.01, output_dir=None):
         plt.savefig(os.path.join(output_dir, 'speed_factor_distribution.png'))
     return speeds
 
+def update_or_check_param(param_name, arg_value, params, force=False, explicitly_defined=False):
+    if not hasattr(params, param_name):
+        # 新增参数
+        setattr(params, param_name, arg_value)
+        print(f"[⚠️ 警告] 参数 `{param_name}` 不在参数类中定义，已动态添加为 `{arg_value}`，"
+              f"建议在 `{params.__class__.__name__}` 中显式声明以提高代码安全性。")
+    else:
+        param_value = getattr(params, param_name)
+        if force:
+            if arg_value is not None:
+                setattr(params, param_name, arg_value)
+        else:
+            if arg_value is not None and param_value != arg_value:
+                raise ValueError(f"[❌ 冲突] `{param_name}` 不一致：参数文件为 `{param_value}`，命令行为 `{arg_value}`。")
+
+    if not explicitly_defined:
+        print(f"[⚠️ 警告] 命令行参数 `{param_name}` 未在 ArgumentParser 中显式声明，已自动处理为 `{arg_value}`。")
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--iid', action='store_true', help='使用IID数据分布')
-    parser.add_argument('--algo', type=str, default='fedBuffAdv', help='选择联邦学习算法')
     parser.add_argument('--a', type=float, default=0.5, help='数据集Dirichlet 分布系数')
-    parser.add_argument('--client_num', type=int, default=50, help='客户端数量')
-    parser.add_argument('--force', action='store_true', help='强制应用参数') 
+    
+    parser.add_argument('--algo', type=str, default='fedBuffAdv', help='选择联邦学习算法')
+    parser.add_argument('--model_name', type=str, default=None, help='模型名称')
+    parser.add_argument('--dataset_name', '--ds', type=str, default=None, help='数据集')
+
     parser.add_argument('--seed', type=int, default=None, help='随机种子')
+    parser.add_argument('--learning_rate', '--lr', type=float, default=None, help='学习率')
+    parser.add_argument('--num_clients','--client_num','--c',type=int, default=50, help='客户端数量')
+    parser.add_argument('--speed_lda', type=float, default=0.01, help='速度因子lambda值')
+
     parser.add_argument('--device', type=str, default=None, help='device')
     parser.add_argument('--output_dir', type=str, default=None, help='输出目录')
     parser.add_argument('--param_file', type=str, default=None, help='参数文件')
-    parser.add_argument('--model_name', type=str, default=None, help='模型名称')
     parser.add_argument('--post_str', type=str, default='', help='后缀')
-    args = parser.parse_args()
-    iid = args.iid
-    algo = args.algo
-    
-    args.post_str = f"_{args.post_str}" if args.post_str else ""
-    if not iid:
-        dataset_dir, dist_str = f'data/noniid-{args.a}_{args.client_num}/cifar10', f"noniid-{args.a}{args.post_str}"
+    parser.add_argument('--force', action='store_true', help='强制应用参数') 
+
+    # Step 2: 提取命令行原始参数
+    known_args, unknown_args = parser.parse_known_args()
+
+    # Step 3: 将 unknown_args 转换为字典
+    extra_args = {}
+    for arg in unknown_args:
+        if arg.startswith("--"):
+            key_value = arg[2:].split("=", 1)
+            if len(key_value) == 2:
+                key, value = key_value
+                # 尝试类型转换（简单处理为 int、float、str）
+                if value.isdigit():
+                    value = int(value)
+                else:
+                    try:
+                        value = float(value)
+                    except ValueError:
+                        pass  # 保持字符串
+                extra_args[key] = value
+            else:
+                print(f"[❌ 错误] 未识别的命令行参数格式: {arg}")
+
+    args = known_args
+    args_dict = vars(args)
+    args_dict.update(extra_args)  # 整合显式参数与额外参数
+
+    args_dict["post_str"] = f"_{args_dict['post_str']}" if args_dict["post_str"] else ""
+
+    # 数据目录和分布字符串
+    # Step 5: 数据路径构造
+    if not args_dict["iid"]:
+        dataset_dir = f'data/noniid-{args_dict["a"]}_{args_dict["num_clients"]}'
+        dist_str = f"noniid-{args_dict['a']}{args_dict['post_str']}"
     else:
-        dataset_dir, dist_str = f'data/iid_{args.client_num}/cifar10', f"iid{args.post_str}"
-    
-    params_class_name = f"{algo}Params"
-    if args.param_file:
-        # 自动导入文件param_file.py，里面会有params_class_name = f"{algo}Params"
-        param_file = importlib.import_module(args.param_file)
-    else:
-        param_file = importlib.import_module("src.config.default")
+        dataset_dir = f'data/iid_{args_dict["num_clients"]}'
+        dist_str = f"iid{args_dict['post_str']}"
+
+    params_class_name = f"{args_dict['algo']}Params"
+    param_module = importlib.import_module(args_dict['param_file']) \
+        if args_dict['param_file'] else importlib.import_module("src.config.default")
 
     # 动态加载名为params_class_name的类
-    params = getattr(param_file, params_class_name)(dataset_dir)
+    params = getattr(param_module, params_class_name)(dataset_dir)
     fix_random_seed(params.seed)
-    params.algorithm = algo.lower()
-    if args.force:
-        params.num_clients = args.client_num
-        params.seed = args.seed if args.seed is not None else params.seed
-        params.device = args.device if args.device is not None else params.device
-        params.model_name = args.model_name if args.model_name is not None else params.model_name
+    params.algorithm = args_dict['algo'].lower()
 
-    if args.client_num and params.num_clients != args.client_num:
-        raise ValueError(f"客户端数量不一致: {params.num_clients} != {args.client_num}, 请检查参数")
-    if args.seed and params.seed != args.seed:
-        raise ValueError(f"随机种子不一致: {params.seed} != {args.seed}, 请检查参数")
-    if args.device and params.device != "cuda:" + args.gpu and args.gpu != "cpu":
-        raise ValueError(f"GPU ID 不一致: {params.device} != {args.gpu}, 请检查参数")
-    if args.model_name and params.model_name != args.model_name:
-        raise ValueError(f"模型名称不一致: {params.model_name} != {args.model_name}, 请检查参数")
+    explicitly_defined_args = {action.dest for action in parser._actions}
 
+    for key, value in args_dict.items():
+        if key in {"post_str", "algo", "output_dir", "param_file", "force", "iid", "a", "speed_lda"}:
+            continue
+        update_or_check_param(
+            key,
+            value,
+            params,
+            force=args_dict['force'],
+            explicitly_defined=(key in explicitly_defined_args)
+        )
 
-    output_dir = f"output/{params.speed_mode}/{params.model_name}/{algo}_{dist_str}" if args.output_dir is None else \
-        os.path.join(args.output_dir,f"{params.model_name}/{algo}_{dist_str}")
+    output_dir = f"output/{params.model_name}/{args_dict['algo']}_{dist_str}" \
+        if args_dict['output_dir'] is None else \
+            os.path.join(args_dict["output_dir"],f"{params.model_name}/{args_dict['algo']}_{dist_str}")
+    
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     if params.speed_factors is None:
         # 生成速度因子
-        params.speed_factors = gen_speed_factor(dataset_dir, lda=0.01, output_dir=output_dir)
+        params.speed_factors = gen_speed_factor(
+            os.path.join(params.dataset_dir, params.dataset_name), 
+            lda=args_dict["speed_lda"], 
+            output_dir=output_dir)
 
     print(
-f'''Time:{datetime.datetime.now()}
+f'''[✅  Startup Information]
+Time:{datetime.datetime.now()}
 output_dir:{output_dir}
 dataset_dir:{dataset_dir}
 Params:
