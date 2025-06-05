@@ -1,5 +1,6 @@
 from collections import deque
 import json
+import os
 from typing import Iterable
 from matplotlib import animation, pyplot as plt
 from matplotlib.artist import Artist
@@ -20,6 +21,12 @@ class SimulationRecorder:
             for i in range(num_clients)
         }
         self.aggregation_times = []
+        self.round_record = {
+            "accuracy": [],
+            "loss": [],
+            "send_bytes": [],
+            "recv_bytes": [],
+        }
                
     def visualize_client_times(self, file_path='client_times.png'):
         client_ids = sorted(self.client_metrics.keys())
@@ -65,6 +72,27 @@ class SimulationRecorder:
         self.writer.add_scalar('Validation-Time(ms)/Accuracy', accuracy, time*1000)
         self.writer.add_scalar('Validation-Time(ms)/Loss', loss, time*1000)
 
+    def record_overhead(self, time, current_round, recv_byte, send_byte, accuracy, loss):
+        send_GB = send_byte / 1073741824 # 1024*1024*1024
+        recv_GB = recv_byte / 1073741824
+        self.writer.add_scalar('Round/Recv_GB', recv_GB, current_round)
+        self.writer.add_scalar('Round/Send_GB', send_GB, current_round)
+        self.writer.add_scalar('Round/Total_GB', recv_GB + send_GB, current_round)
+
+        self.writer.add_scalar('Time(ms)/Recv_GB', recv_GB, time*1000)
+        self.writer.add_scalar('Time(ms)/Send_GB', send_GB, time*1000)
+        self.writer.add_scalar('Time(ms)/Total_GB', recv_GB + send_GB, time*1000)
+
+        if accuracy is not None:  
+            self.writer.add_scalar('Recv_MB/Accuracy', accuracy, recv_byte/(1024*1024))
+            self.writer.add_scalar('Send_MB/Accuracy', accuracy, send_byte/(1024*1024))
+            self.writer.add_scalar('Total_MB/Accuracy', accuracy, (send_byte+recv_byte)/(1024*1024))
+        
+        self.round_record["accuracy"].append(accuracy)
+        self.round_record["loss"].append(loss)
+        self.round_record["send_bytes"].append(send_byte)
+        self.round_record["recv_bytes"].append(recv_byte)
+
     def record_client_status(self, time, client_id, **kwargs):
         status, model_version, speed_factor = kwargs['status'], kwargs['model_version'], kwargs['speed_factor']
         if 'window_id' in kwargs or 'BTm' in kwargs or 'LDu' in kwargs:
@@ -82,14 +110,17 @@ class SimulationRecorder:
     def record_window_change(self, time, cur_window_num):
         self.events.append(('window_change', time, cur_window_num))
 
-    def save(self, file_path='simulation_log.txt'):
+    def save(self, save_dir):
         # 保存事件到文件，格式为json
-        json.dump(self.events, open(file_path, 'w'), indent=4, ensure_ascii=False)
+        os.makedirs(save_dir, exist_ok=True)
+        json.dump(self.events, open(os.path.join(save_dir, 'event.json'), 'w'), indent=4, ensure_ascii=False)
+        json.dump(self.round_record, open(os.path.join(save_dir, 'round_record.json'), 'w'), indent=4, ensure_ascii=False)
 
-    def load(self, file_path='simulation_log.txt'):
+    def load(self, save_dir):
         # 从文件加载事件
-        self.events = json.load(open(file_path, 'r'))
-
+        self.events = open(os.path.join(save_dir, 'event.json'), 'r')
+        self.round_record = open(os.path.join(save_dir, 'round_record.json'), 'r')
+  
 # 动画生成类
 class FLAnimator:
     def __init__(self, recorder, num_clients, buffer_size, time_scale=1.0):

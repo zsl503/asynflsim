@@ -1,3 +1,5 @@
+# datasets.py
+
 import json
 import os
 import pickle
@@ -19,6 +21,7 @@ class BaseDataset(Dataset):
     def __init__(self) -> None:
         self.classes: list = None
         self.data: torch.Tensor = None
+        self.total_targets: torch.Tensor = None
         self.targets: torch.Tensor = None
         self.train_data_transform = None
         self.train_target_transform = None
@@ -26,9 +29,11 @@ class BaseDataset(Dataset):
         self.test_target_transform = None
         self.data_transform = None
         self.target_transform = None
+        self.test_data = None
+        self.test_targets = None
 
     def __getitem__(self, index):
-        data, targets = self.data[index], self.targets[index]
+        data, targets = self.data[index], self.total_targets[index]
         if self.data_transform is not None:
             data = self.data_transform(data)
         if self.target_transform is not None:
@@ -45,7 +50,7 @@ class BaseDataset(Dataset):
         self.target_transform = self.test_target_transform
 
     def __len__(self):
-        return len(self.targets)
+        return len(self.total_targets)
 
 
 class FEMNIST(BaseDataset):
@@ -72,7 +77,7 @@ class FEMNIST(BaseDataset):
         targets = np.load(root / "targets.npy")
 
         self.data = torch.from_numpy(data).float().reshape(-1, 1, 28, 28)
-        self.targets = torch.from_numpy(targets).long()
+        self.total_targets = torch.from_numpy(targets).long()
         self.classes = list(range(62))
         self.test_data_transform = test_data_transform
         self.test_target_transform = test_target_transform
@@ -96,8 +101,8 @@ class Synthetic(BaseDataset):
         targets = np.load(root / "targets.npy")
 
         self.data = torch.from_numpy(data).float()
-        self.targets = torch.from_numpy(targets).long()
-        self.classes = list(range(len(self.targets.unique())))
+        self.total_targets = torch.from_numpy(targets).long()
+        self.classes = list(range(len(self.total_targets.unique())))
 
 
 class CelebA(BaseDataset):
@@ -124,7 +129,7 @@ class CelebA(BaseDataset):
         targets = np.load(root / "targets.npy")
 
         self.data = torch.from_numpy(data).permute([0, -1, 1, 2]).float()
-        self.targets = torch.from_numpy(targets).long()
+        self.total_targets = torch.from_numpy(targets).long()
         self.test_data_transform = test_data_transform
         self.test_target_transform = test_target_transform
         self.train_data_transform = train_data_transform
@@ -149,7 +154,7 @@ class MedMNIST(BaseDataset):
         self.data = (
             torch.Tensor(np.load(root / "raw" / "xdata.npy")).float().unsqueeze(1)
         )
-        self.targets = (
+        self.total_targets = (
             torch.Tensor(np.load(root / "raw" / "ydata.npy")).long().squeeze()
         )
         self.test_data_transform = test_data_transform
@@ -176,7 +181,7 @@ class COVID19(BaseDataset):
             .permute([0, -1, 1, 2])
             .float()
         )
-        self.targets = (
+        self.total_targets = (
             torch.Tensor(np.load(root / "raw" / "ydata.npy")).long().squeeze()
         )
         self.classes = [0, 1, 2, 3]
@@ -202,12 +207,16 @@ class USPS(BaseDataset):
         train_part = torchvision.datasets.USPS(root / "raw", True, download=True)
         test_part = torchvision.datasets.USPS(root / "raw", False, download=True)
         train_data = torch.Tensor(train_part.data).float().unsqueeze(1)
-        test_data = torch.Tensor(test_part.data).float().unsqueeze(1)
+        self.test_data = torch.Tensor(test_part.data).float().unsqueeze(1)
         train_targets = torch.Tensor(train_part.targets).long()
-        test_targets = torch.Tensor(test_part.targets).long()
+        self.test_targets = torch.Tensor(test_part.targets).long()
 
-        self.data = torch.cat([train_data, test_data])
-        self.targets = torch.cat([train_targets, test_targets])
+        self.data = torch.cat([train_data, self.test_data])
+        self.total_targets = torch.cat([train_targets, self.test_targets])
+        if not args.global_test:
+            self.targets = self.total_targets
+        else:
+            self.targets = train_targets
         self.classes = list(range(10))
         self.test_data_transform = test_data_transform
         self.test_target_transform = test_target_transform
@@ -231,12 +240,12 @@ class SVHN(BaseDataset):
         train_part = torchvision.datasets.SVHN(root / "raw", "train", download=True)
         test_part = torchvision.datasets.SVHN(root / "raw", "test", download=True)
         train_data = torch.Tensor(train_part.data).float()
-        test_data = torch.Tensor(test_part.data).float()
+        self.test_data = torch.Tensor(test_part.data).float()
         train_targets = torch.Tensor(train_part.labels).long()
-        test_targets = torch.Tensor(test_part.labels).long()
+        self.test_targets = torch.Tensor(test_part.labels).long()
 
-        self.data = torch.cat([train_data, test_data])
-        self.targets = torch.cat([train_targets, test_targets])
+        self.data = torch.cat([train_data, self.test_data])
+        self.total_targets = torch.cat([train_targets, self.test_targets])
         self.classes = list(range(10))
         self.test_data_transform = test_data_transform
         self.test_target_transform = test_target_transform
@@ -258,11 +267,15 @@ class MNIST(BaseDataset):
         train_part = torchvision.datasets.MNIST(root, True, download=True)
         test_part = torchvision.datasets.MNIST(root, False)
         train_data = torch.Tensor(train_part.data).float().unsqueeze(1)
-        test_data = torch.Tensor(test_part.data).float().unsqueeze(1)
+        self.test_data = torch.Tensor(test_part.data).float().unsqueeze(1)
         train_targets = torch.Tensor(train_part.targets).long().squeeze()
-        test_targets = torch.Tensor(test_part.targets).long().squeeze()
-        self.data = torch.cat([train_data, test_data])
-        self.targets = torch.cat([train_targets, test_targets])
+        self.test_targets = torch.Tensor(test_part.targets).long().squeeze()
+        self.data = torch.cat([train_data, self.test_data])
+        self.total_targets = torch.cat([train_targets, self.test_targets])
+        if not args.global_test:
+            self.targets = self.total_targets
+        else:
+            self.targets = train_targets
         self.classes = train_part.classes
         self.test_data_transform = test_data_transform
         self.test_target_transform = test_target_transform
@@ -284,11 +297,15 @@ class FashionMNIST(BaseDataset):
         train_part = torchvision.datasets.FashionMNIST(root, True, download=True)
         test_part = torchvision.datasets.FashionMNIST(root, False, download=True)
         train_data = torch.Tensor(train_part.data).float().unsqueeze(1)
-        test_data = torch.Tensor(test_part.data).float().unsqueeze(1)
+        self.test_data = torch.Tensor(test_part.data).float().unsqueeze(1)
         train_targets = torch.Tensor(train_part.targets).long().squeeze()
-        test_targets = torch.Tensor(test_part.targets).long().squeeze()
-        self.data = torch.cat([train_data, test_data])
-        self.targets = torch.cat([train_targets, test_targets])
+        self.test_targets = torch.Tensor(test_part.targets).long().squeeze()
+        self.data = torch.cat([train_data, self.test_data])
+        self.total_targets = torch.cat([train_targets, self.test_targets])
+        if not args.global_test:
+            self.targets = self.total_targets
+        else:
+            self.targets = train_targets
         self.classes = train_part.classes
         self.test_data_transform = test_data_transform
         self.test_target_transform = test_target_transform
@@ -319,11 +336,16 @@ class EMNIST(BaseDataset):
             root, split=split, train=False, download=True
         )
         train_data = torch.Tensor(train_part.data).float().unsqueeze(1)
-        test_data = torch.Tensor(test_part.data).float().unsqueeze(1)
+        self.test_data = torch.Tensor(test_part.data).float().unsqueeze(1)
         train_targets = torch.Tensor(train_part.targets).long().squeeze()
-        test_targets = torch.Tensor(test_part.targets).long().squeeze()
-        self.data = torch.cat([train_data, test_data])
-        self.targets = torch.cat([train_targets, test_targets])
+        self.test_targets = torch.Tensor(test_part.targets).long().squeeze()
+
+        self.data = torch.cat([train_data, self.test_data])
+        self.total_targets = torch.cat([train_targets, self.test_targets])
+        if not args.global_test:
+            self.targets = self.total_targets
+        else:
+            self.targets = train_targets
         self.classes = train_part.classes
         self.test_data_transform = test_data_transform
         self.test_target_transform = test_target_transform
@@ -345,11 +367,15 @@ class CIFAR10(BaseDataset):
         train_part = torchvision.datasets.CIFAR10(root, True, download=True)
         test_part = torchvision.datasets.CIFAR10(root, False, download=True)
         train_data = torch.Tensor(train_part.data).permute([0, -1, 1, 2]).float()
-        test_data = torch.Tensor(test_part.data).permute([0, -1, 1, 2]).float()
+        self.test_data = torch.Tensor(test_part.data).permute([0, -1, 1, 2]).float()
         train_targets = torch.Tensor(train_part.targets).long().squeeze()
-        test_targets = torch.Tensor(test_part.targets).long().squeeze()
-        self.data = torch.cat([train_data, test_data])
-        self.targets = torch.cat([train_targets, test_targets])
+        self.test_targets = torch.Tensor(test_part.targets).long().squeeze()
+        self.data = torch.cat([train_data, self.test_data])
+        self.total_targets = torch.cat([train_targets, self.test_targets])
+        if not args.global_test:
+            self.targets = self.total_targets
+        else:
+            self.targets = train_targets
         self.classes = train_part.classes
         self.test_data_transform = test_data_transform
         self.test_target_transform = test_target_transform
@@ -371,11 +397,15 @@ class CIFAR100(BaseDataset):
         train_part = torchvision.datasets.CIFAR100(root, True, download=True)
         test_part = torchvision.datasets.CIFAR100(root, False, download=True)
         train_data = torch.Tensor(train_part.data).permute([0, -1, 1, 2]).float()
-        test_data = torch.Tensor(test_part.data).permute([0, -1, 1, 2]).float()
+        self.test_data = torch.Tensor(test_part.data).permute([0, -1, 1, 2]).float()
         train_targets = torch.Tensor(train_part.targets).long().squeeze()
-        test_targets = torch.Tensor(test_part.targets).long().squeeze()
-        self.data = torch.cat([train_data, test_data])
-        self.targets = torch.cat([train_targets, test_targets])
+        self.test_targets = torch.Tensor(test_part.targets).long().squeeze()
+        self.data = torch.cat([train_data, self.test_data])
+        self.total_targets = torch.cat([train_targets, self.test_targets])
+        if not args.global_test:
+            self.targets = self.total_targets
+        else:
+            self.targets = train_targets
         self.classes = train_part.classes
         self.test_data_transform = test_data_transform
         self.test_target_transform = test_target_transform
@@ -416,9 +446,9 @@ class CIFAR100(BaseDataset):
                 for cls in sub_cls:
                     mapping[cls] = super_cls
             new_targets = []
-            for cls in self.targets:
+            for cls in self.total_targets:
                 new_targets.append(mapping[self.classes[cls]])
-            self.targets = torch.tensor(new_targets, dtype=torch.long)
+            self.total_targets = torch.tensor(new_targets, dtype=torch.long)
 
 
 class TinyImagenet(BaseDataset):
@@ -477,7 +507,7 @@ class TinyImagenet(BaseDataset):
             torch.save(torch.tensor(targets, dtype=torch.long), root / "targets.pt")
 
         self.data = torch.load(root / "data.pt")
-        self.targets = torch.load(root / "targets.pt")
+        self.total_targets = torch.load(root / "targets.pt")
         self.test_data_transform = test_data_transform
         self.test_target_transform = test_target_transform
         self.train_data_transform = train_data_transform
@@ -533,7 +563,7 @@ class CINIC10(BaseDataset):
             torch.save(torch.tensor(targets, dtype=torch.long), root / "targets.pt")
 
         self.data = torch.load(root / "data.pt")
-        self.targets = torch.load(root / "targets.pt")
+        self.total_targets = torch.load(root / "targets.pt")
         self.test_data_transform = test_data_transform
         self.test_target_transform = test_target_transform
         self.train_data_transform = train_data_transform
@@ -575,7 +605,7 @@ class DomainNet(BaseDataset):
             self.filename_list = pickle.load(f)
 
         self.classes = list(metadata["classes"].keys())
-        self.targets = torch.load(targets_path)
+        self.total_targets = torch.load(targets_path)
         self.pre_transform = transforms.Compose(
             [
                 transforms.Resize(metadata["image_size"]),
@@ -589,7 +619,7 @@ class DomainNet(BaseDataset):
 
     def __getitem__(self, index):
         data = self.pre_transform(Image.open(self.filename_list[index]).convert("RGB"))
-        targets = self.targets[index]
+        targets = self.total_targets[index]
         if self.data_transform is not None:
             data = self.data_transform(data)
         if self.target_transform is not None:

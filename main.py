@@ -54,7 +54,6 @@ def main(params:BaseExperimentParams, output_dir:str):
     else:
         logging.info("GPU is not available, using CPU instead.")
         params.device = "cpu"
-    
     # 加载数据
     (train_client_datasets, 
      val_client_datasets, 
@@ -134,8 +133,8 @@ def main(params:BaseExperimentParams, output_dir:str):
     torch.save(server.global_model.state_dict(), f"{output_dir}/final_global_model.pth")
     logging.info(f"Completed {server.aggregation_count} aggregation rounds")
     
-    recorder.save(f"{output_dir}/recorder.json")
-    logging.info("Recorder events saved to recorder.json")
+    recorder.save(f"{output_dir}/recorder/")
+    logging.info(f"Recorder events saved to {output_dir}/recorder/")
 
 
     # # 画图，每个client一张
@@ -165,18 +164,18 @@ def main(params:BaseExperimentParams, output_dir:str):
     plt.savefig(f"{output_dir}/aggregation_timeline.png")
 
     # 生成动画
-    logging.info("Generating animation...")
-    if 'test' not in params.algorithm:
-        animator = FLAnimator(recorder, params.num_clients, params.buffer_size, time_scale=1)
-    else:
-        animator = AdvFLAnimator(recorder, params.num_clients, params.buffer_size, time_scale=1, max_window_size=4)
-    ani = animator.animate()
-    try:
-        # 判断格式MP4是否可用
-        ani.save(f"{output_dir}/fl_simulation.{params.video_format}", writer="ffmpeg", fps=animator.fps)
-        logging.info(f"Animation saved to fl_simulation.{params.video_format}")
-    except Exception as e:
-        logging.info(f"Animation failed: {e}")
+    # logging.info("Generating animation...")
+    # if 'test' not in params.algorithm:
+    #     animator = FLAnimator(recorder, params.num_clients, params.buffer_size, time_scale=1)
+    # else:
+    #     animator = AdvFLAnimator(recorder, params.num_clients, params.buffer_size, time_scale=1, max_window_size=4)
+    # ani = animator.animate()
+    # try:
+    #     # 判断格式MP4是否可用
+    #     ani.save(f"{output_dir}/fl_simulation.{params.video_format}", writer="ffmpeg", fps=animator.fps)
+    #     logging.info(f"Animation saved to fl_simulation.{params.video_format}")
+    # except Exception as e:
+    #     logging.info(f"Animation failed: {e}")
     
 def gen_speed_factor(data_dir, lda=0.01, output_dir=None):
     """

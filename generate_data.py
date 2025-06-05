@@ -1,3 +1,4 @@
+# generate_data.py
 import json
 import os
 import pickle
@@ -27,6 +28,8 @@ from src.utils.data.datasets import DATASETS, BaseDataset
 
 CURRENT_DIR = Path(__file__).parent.absolute()
 
+CURRENT_DIR = Path(__file__).parent.absolute()
+
 
 def main(args):
     if args.dir_name is None:
@@ -52,7 +55,7 @@ def main(args):
     elif args.dataset == "synthetic":
         dataset = generate_synthetic_data(args, partition, stats)
     else:  # MEDMNIST, COVID, MNIST, CIFAR10, ...
-        # NOTE: If `args.ood_domains`` is not empty, then it will map all labels (class space) to the domain space
+        # NOTE: If `args.ood_domains`` is not empty, then FL-bench will map all labels (class space) to the domain space
         # and partition data according to the new `targets` array.
         dataset = DATASETS[args.dataset](dataset_root, args)
         targets = np.array(dataset.targets, dtype=np.int32)
@@ -162,8 +165,9 @@ def main(args):
             for client_id in partition["separation"]["train"]:
                 indices = partition["data_indices"][client_id]
                 np.random.shuffle(indices)
-                testset_size = int(len(indices) * args.test_ratio)
-                valset_size = int(len(indices) * args.val_ratio)
+                testset_size = int(len(indices) * args.test_ratio) if not args.global_test else 0
+                valset_size = int(len(indices) * args.val_ratio) if not args.global_val else 0
+
                 trainset, valset, testset = (
                     indices[testset_size + valset_size :],
                     indices[testset_size : testset_size + valset_size],
@@ -183,21 +187,23 @@ def main(args):
                     "test": np.array([], dtype=np.int64),
                 }
 
-            for client_id in partition["separation"]["val"]:
-                indices = partition["data_indices"][client_id]
-                partition["data_indices"][client_id] = {
-                    "train": np.array([], dtype=np.int64),
-                    "val": indices,
-                    "test": np.array([], dtype=np.int64),
-                }
+            if args.global_val:
+                for client_id in partition["separation"]["val"]:
+                    indices = partition["data_indices"][client_id]
+                    partition["data_indices"][client_id] = {
+                        "train": np.array([], dtype=np.int64),
+                        "val": indices,
+                        "test": np.array([], dtype=np.int64),
+                    }
 
-            for client_id in partition["separation"]["test"]:
-                indices = partition["data_indices"][client_id]
-                partition["data_indices"][client_id] = {
-                    "train": np.array([], dtype=np.int64),
-                    "val": np.array([], dtype=np.int64),
-                    "test": indices,
-                }
+            if args.global_test:
+                for client_id in partition["separation"]["test"]:
+                    indices = partition["data_indices"][client_id]
+                    partition["data_indices"][client_id] = {
+                        "train": np.array([], dtype=np.int64),
+                        "val": np.array([], dtype=np.int64),
+                        "test": indices,
+                    }
 
     if args.dataset in ["domain"]:
         class_targets = np.array(dataset.targets, dtype=np.int32)
@@ -279,6 +285,12 @@ def main(args):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument(
+        "-gt", "--global_test", type=bool, default=True
+    )
+    parser.add_argument(
+        "-gv", "--global_val", type=bool, default=True
+    )
+    parser.add_argument(
         "-d", "--dataset", type=str, choices=DATASETS.keys(), required=True
     )
     parser.add_argument("--iid", type=int, default=0)
@@ -288,7 +300,7 @@ if __name__ == "__main__":
         "-sp", "--split", type=str, choices=["sample", "user"], default="sample"
     )
     parser.add_argument("-vr", "--val_ratio", type=float, default=0.0)
-    parser.add_argument("-tr", "--test_ratio", type=float, default=0.2)
+    parser.add_argument("-tr", "--test_ratio", type=float, default=0.25)
     parser.add_argument("-pd", "--plot_distribution", type=int, default=1)
 
     parser.add_argument("-dn", "--dir_name", type=str, default=None)
@@ -326,7 +338,7 @@ if __name__ == "__main__":
     parser.add_argument("-sm", "--semantic", type=int, default=0)
     parser.add_argument("--efficient_net_type", type=int, default=0)
     parser.add_argument("--gmm_max_iter", type=int, default=100)
-    parser.add_argument(
+    parser.add_argument( 
         "--gmm_init_params", type=str, choices=["random", "kmeans"], default="kmeans"
     )
     parser.add_argument("--pca_components", type=int, default=256)

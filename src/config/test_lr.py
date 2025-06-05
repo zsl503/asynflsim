@@ -10,7 +10,7 @@ class ExperimentParams(BaseExperimentParams):
         self.server_lr = 1.0  # 通常设为1.0直接使用客户端更新
         self.buffer_size = 10
         self.clients_per_round = None
-        self.device = "cuda:0"
+        self.device = "cuda:1"
         self.train_method = "minibatch"  # minibatch, fullbatch
         self.select_method = "random_async"  # random_async, random_sync 
 
@@ -33,6 +33,7 @@ class ExperimentParams(BaseExperimentParams):
 
         # 模型参数
         self.model_name = "res18"
+        # self.model_name = "avgcnn"
         
         # 算法选择
         self.algorithm = None

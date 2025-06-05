@@ -9,7 +9,7 @@ class ExperimentParams(BaseExperimentParams):
         self.sim_time = 600000
         self.server_lr = 1.0  # 通常设为1.0直接使用客户端更新
         self.buffer_size = 10
-        self.clients_per_round = 20
+        self.clients_per_round = None
         self.device = "cuda:1"
         self.train_method = "minibatch"  # minibatch, fullbatch
         self.select_method = "random_async"  # random_async, random_sync 

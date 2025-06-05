@@ -17,8 +17,9 @@ class FedGCRServer(BaseServer):
         self.h_t = {key: torch.zeros_like(value, device=self.device).float() for key, value in model.state_dict().items()}
         self.gamma = self.params.gamma
 
-        self.flag = 1
+        self.flag = 4
         logging.info(f"FedGCRServer: flag={self.flag}")
+        print(f"FedGCRServer: flag={self.flag}")
 
     def second_correct(self, delta, client_id, model_version, key):
         # 如果是bn层，直接返回
@@ -63,11 +64,28 @@ class FedGCRServer(BaseServer):
                 select = 1
                 res_vec = d_vec - g_vec
             elif scale < 0 and alpha > 1e-5:
-                    select = 2
-                    res_vec = d_vec - scale * g_vec
+                select = 2
+                res_vec = d_vec - scale * g_vec
             else:
                 select = 3
                 res_vec = d_vec + g_vec
+        
+        # Fourth
+        elif self.flag == 4:
+            if scale > 1:
+                select = 1
+                res_vec = d_vec
+            else:
+                if scale > 0:
+                    select = 2
+                    res_vec = d_vec + g_vec
+                else:
+                    select = 3
+                    res_vec = d_vec - scale * g_vec
+
+        #  Fifth
+        elif self.flag == 5:
+            res_vec = d_vec + g_vec
 
         logging.info(f"{key}: selected={select} alpha={alpha.item():.3e}, beta={beta.item():.3e}, scale={scale.item():.3f}")
         return res_vec.view_as(delta)
@@ -95,8 +113,8 @@ class FedGCRServer(BaseServer):
             self.aggregation_trigger.succeed()
 
     def aggregate(self):
-        logging.info(f"Staleness: {[self.model_version - model_version for _, _, _, model_version in self.buffer]}")
-        print(f"Staleness: {[self.model_version - model_version for _, _, _, model_version in self.buffer]}")     
+        # logging.info(f"Staleness: {[self.model_version - model_version for _, _, _, model_version in self.buffer]}")
+        # print(f"Staleness: {[self.model_version - model_version for _, _, _, model_version in self.buffer]}")     
         avg_delta = {}
         for key, value in self.global_model.state_dict().items():
             layer_sum = torch.stack(
@@ -126,7 +144,6 @@ class FedGCRClient(FedBuffClient):
         super().__init__(client_id, base_model, data_loaders, recorder, params, speed_factor)
         self.old_delta = None
         self.last_global_params = None
-        self.local_round = 1
         # self.local_train = self.gcr_local_train_minibatch_old
 
     def send_to_server(self, server):
@@ -213,6 +230,40 @@ class FedGCRClient(FedBuffClient):
                 self.optimizer.step()
 
         self.local_round += 1
+
+    def gcr_local_train_minibatch_2(self):
+        total_global_delta = {}
+        if self.last_global_params is not None:
+            # 直接计算total_global_delta，不需要中间字典
+            for key, w in self.model.named_parameters():
+                total_global_delta[key] = (self.last_global_params[key] - w.detach().cpu()).flatten()
+                # 归一化
+                # total_global_delta[key] /= torch.norm(total_global_delta[key])
+
+        self.last_global_params = {k: v.cpu() for k, v in self.model.state_dict().items()}
+        self.model.train()
+
+        for _ in range (self.params.local_rounds):
+            for images, labels in self.train_data_loader:
+                images, labels = images.to(self.device), labels.to(self.device)
+                self.optimizer.zero_grad()
+                outputs = self.model(images)
+                loss = F.cross_entropy(outputs, labels)
+                if total_global_delta != {}:
+                    loss_proj = 0
+                    for key, w in self.model.named_parameters():
+                        local_delta = (self.last_global_params[key] - w.cpu()).flatten()
+                                            # 计算垂直分量：Δw - (Δw·d)d
+                        d = total_global_delta[key]
+                        proj = torch.dot(local_delta, d) * d
+                        perpendicular = local_delta - proj
+                        loss_proj += torch.norm(perpendicular) ** 2
+                        # proximal_term += torch.dot(local_delta, total_global_delta[key]).item()
+                    # logging.info(f"C{self.client_id}: Loss projection: {loss_proj.item():.3e}")
+                    loss += (self.params.mu) * loss_proj
+                
+                loss.backward()
+                self.optimizer.step()
 
 Client = FedGCRClient
 Server = FedGCRServer

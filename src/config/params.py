@@ -1,3 +1,8 @@
+
+class DatasetArgs:
+    def __init__(self):
+        self.global_test = True
+
 class BaseExperimentParams:
     def __init__(self):
         self.use_sample_weight = True

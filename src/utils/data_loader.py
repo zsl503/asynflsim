@@ -43,17 +43,23 @@ class DataHandler:
     @staticmethod
     def load_data(dataset_name:str, file_dir, args = None, center_test = False):
         dataset_name = dataset_name.lower()
-        if dataset_name == "cifar10":
-            train_client_datasets, val_client_datasets, test_client_datasets = \
-                DataHandler.get_client_dataset(dataset_name, file_dir, args)
-            if center_test:
-                indices = []
-                for c in test_client_datasets:
-                    # print("test",c.indices.keys())
-                    indices.extend(c.indices)
-                return Subset(dataset=test_client_datasets[0].dataset, indices=indices)
-            else:
-                return train_client_datasets, val_client_datasets, test_client_datasets
+        # if dataset_name == "cifar10":
+        #     train_client_datasets, val_client_datasets, test_client_datasets = \
+        #         DataHandler.get_client_dataset(dataset_name, file_dir, args)
+        #     if center_test:
+        #         return DataHandler.get_global_test_dataset(dataset_name, file_dir, args)
+        #         # indices = []
+        #         # for c in test_client_datasets:
+        #         #     # print("test",c.indices.keys())
+        #         #     indices.extend(c.indices)
+        #         # return Subset(dataset=test_client_datasets[0].dataset, indices=indices)
+        #     else:
+        #         return train_client_datasets, val_client_datasets, test_client_datasets
+        if center_test:
+            return DataHandler.get_global_test_dataset(dataset_name, file_dir, args)
+        else:
+            # train_client_datasets, val_client_datasets, test_client_datasets = \
+            return DataHandler.get_client_dataset(dataset_name, file_dir, args)
         # 扩展其他数据集...
 
     @staticmethod
@@ -126,3 +132,32 @@ class DataHandler:
             test_client_datasets.append(Subset(dataset, indices["test"]))
 
         return train_client_datasets, val_client_datasets, test_client_datasets
+    
+
+    @staticmethod
+    def get_global_test_dataset(dataset_name, file_dir, args = None) -> BaseDataset:
+        """Load FL dataset and partitioned data indices of clients.
+
+        Raises:
+            FileNotFoundError: When the target dataset has not beed processed.
+
+        Returns:
+            FL dataset.
+        """
+        try:
+            with open(os.path.join(file_dir, "partition.pkl"), "rb") as f:
+                partition = pickle.load(f)
+        except:
+            raise FileNotFoundError(
+                f"Please partition {dataset_name} first."
+            )
+
+        # [0: {"train": [...], "val": [...], "test": [...]}, ...]
+
+        dataset: BaseDataset = DATASETS[dataset_name](
+            root=file_dir,
+            args=args,
+            **DataHandler.get_dataset_transforms(dataset_name),
+        )
+        test_indices = list(range(len(dataset.targets), len(dataset.data)))
+        return Subset(dataset, test_indices)

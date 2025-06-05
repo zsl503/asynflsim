@@ -62,6 +62,8 @@ class BaseServer:
             logging.info(log_str)
             print(log_str)
             self.recorder.record_validation(accuracy, loss, self.aggregation_count, self.env.now)
+            return accuracy, loss
+        return None, None
 
     def wake_up_clients(self, selected_ids):
         for cid in selected_ids:
@@ -102,6 +104,10 @@ class BaseServer:
         # 选择的客户端数量不足时，从可选池中随机选择一些客户端
         if len(selected_ids) < client_per_round:
             rest_set = set(list(self.client_pool.keys())) - set(selected_ids)
+            print(f"selected_ids: {len(selected_ids)}, client_per_round: {client_per_round}, rest_set: {len(rest_set)}")
+            if len(rest_set) == 0:
+                self.selected_clients = set(selected_ids)
+                rest_set = set(list(self.client_pool.keys())) - set(self.selected_clients)
             extra_ids = random.sample(rest_set, client_per_round - len(selected_ids))
             selected_ids += extra_ids
             # 更新已选择的客户端集合
@@ -116,9 +122,24 @@ class BaseServer:
     def _select_random_async_clients(self):
         """客户端选择策略：随机选择Mc个活跃客户端"""
         all_ids = list(self.client_pool.keys())
+
+        if not hasattr(self, "selected_client_history"):
+            self.selected_client_history = set()
+        
         if self.params.clients_per_round is not None:
-            active_num = self.params.num_clients - len(all_ids)
-            selected_ids = random.sample(all_ids, max(0, self.params.clients_per_round - active_num))
+            # 计算当前剩余未被选中过的客户端
+            need_num = self.params.clients_per_round - (self.params.num_clients - len(all_ids))
+            unselected_ids = list(set(all_ids) - self.selected_client_history)
+
+            if len(unselected_ids) >= need_num:
+                selected_ids = random.sample(unselected_ids, need_num)
+            else:
+                # 不足 clients_per_round 个未选中过的客户端，则重置历史
+                self.selected_client_history = set()
+                selected_ids = random.sample(all_ids, need_num)
+
+            # 更新历史
+            self.selected_client_history.update(selected_ids)
         else:
             selected_ids = all_ids
         logging.info(f"[Round {self.model_version}] Selected clients: {sorted(selected_ids)}")
@@ -152,8 +173,9 @@ class BaseServer:
         self.global_model.eval()
         total_correct = 0
         total_loss = 0
-        class_correct = [0] * 10
-        class_total = [0] * 10
+        class_num = len(self.test_loader.dataset.dataset.classes)
+        class_correct = [0] * class_num
+        class_total = [0] * class_num
         with torch.no_grad():
             for data, targets in self.test_loader:
                 data, targets = data.to(self.device), targets.to(self.device)
@@ -170,10 +192,15 @@ class BaseServer:
     
         # 打印各类别准确率
         logging.info("Class-wise Accuracy:")
-        for i in range(10):
-            if class_total[i] > 0:
-                logging.info(f"Class {i}: {100*class_correct[i]/class_total[i]:.2f}%")
-        
+        if class_num <= 20:
+            for i in range(class_num):
+                if class_total[i] > 0:
+                    logging.info(f"Class {i}: {100*class_correct[i]/class_total[i]:.2f}%")
+        else:
+            # 如果类别数量超过20，则一行打印10个
+            for i in range(0, class_num, 10):
+                class_str = ", ".join([f"Class {j}: {100*class_correct[j]/class_total[j]:.2f}%" for j in range(i, min(i+10, class_num)) if class_total[j] > 0])
+                logging.info(class_str)
 
         accuracy = total_correct / len(self.test_loader.dataset)
         avg_loss = total_loss / len(self.test_loader)

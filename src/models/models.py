@@ -102,7 +102,6 @@ class ResNet(DecoupledModel):
         self.classifier = nn.Linear(self.base.fc.in_features, NUM_CLASSES[dataset])
         self.base.fc = nn.Identity()
 
-
 # CNN used in FedAvg
 class FedAvgCNN(DecoupledModel):
     feature_length = {
@@ -168,10 +167,131 @@ class SimpleCNN(nn.Module):
         x = self.conv_layers(x)
         x = x.view(x.size(0), -1)
         return self.fc_layers(x)
-    
+
+
+class AlexNet(DecoupledModel):
+    def __init__(self, dataset):
+        super().__init__()
+
+        # NOTE: If you don't want parameters pretrained, set `pretrained` as False
+        pretrained = True
+        alexnet = models.alexnet(
+            weights=models.AlexNet_Weights.DEFAULT if pretrained else None
+        )
+        self.base = alexnet
+        self.classifier = nn.Linear(
+            alexnet.classifier[-1].in_features, NUM_CLASSES[dataset]
+        )
+        self.base.classifier[-1] = nn.Identity()
+
+
+class LeNet5(DecoupledModel):
+    feature_length = {
+        "mnist": 256,
+        "medmnistS": 256,
+        "medmnistC": 256,
+        "medmnistA": 256,
+        "covid19": 49184,
+        "fmnist": 256,
+        "emnist": 256,
+        "femnist": 256,
+        "cifar10": 400,
+        "cinic10": 400,
+        "svhn": 400,
+        "cifar100": 400,
+        "celeba": 33456,
+        "usps": 200,
+        "tiny_imagenet": 2704,
+    }
+
+    def __init__(self, dataset: str) -> None:
+        super(LeNet5, self).__init__()
+        self.base = nn.Sequential(
+            OrderedDict(
+                conv1=nn.Conv2d(INPUT_CHANNELS[dataset], 6, 5),
+                bn1=nn.BatchNorm2d(6),
+                activation1=nn.ReLU(),
+                pool1=nn.MaxPool2d(2),
+                conv2=nn.Conv2d(6, 16, 5),
+                bn2=nn.BatchNorm2d(16),
+                activation2=nn.ReLU(),
+                pool2=nn.MaxPool2d(2),
+                flatten=nn.Flatten(),
+                fc1=nn.Linear(self.feature_length[dataset], 120),
+                activation3=nn.ReLU(),
+                fc2=nn.Linear(120, 84),
+                activation4=nn.ReLU(),
+            )
+        )
+
+        self.classifier = nn.Linear(84, NUM_CLASSES[dataset])
+
+
+
+class MyAlexNet(DecoupledModel):
+    """
+    used for cifar10
+    """
+    def __init__(self, dataset: str, use_bn: bool = True):
+        super().__init__()
+        self.base = nn.Sequential(
+            OrderedDict([
+                ('conv1', nn.Conv2d(3, 64, kernel_size=5, padding=2)),
+                ('bn1', nn.BatchNorm2d(64)),
+                ('relu1', nn.ReLU(inplace=True)),
+                ('maxpool1', nn.MaxPool2d(kernel_size=3, stride=2)),
+
+                ('conv2', nn.Conv2d(64, 192, kernel_size=5, padding=2)),
+                ('bn2', nn.BatchNorm2d(192)),
+                ('relu2', nn.ReLU(inplace=True)),
+                ('maxpool2', nn.MaxPool2d(kernel_size=3, stride=2)),
+
+                ('conv3', nn.Conv2d(192, 384, kernel_size=3, padding=1)),
+                ('bn3', nn.BatchNorm2d(384)),
+                ('relu3', nn.ReLU(inplace=True)),
+
+                ('conv4', nn.Conv2d(384, 256, kernel_size=3, padding=1)),
+                ('bn4', nn.BatchNorm2d(256)),
+                ('relu4', nn.ReLU(inplace=True)),
+
+                ('conv5', nn.Conv2d(256, 256, kernel_size=3, padding=1)),
+                ('bn5', nn.BatchNorm2d(256)),
+                ('relu5', nn.ReLU(inplace=True)),
+                ('maxpool5', nn.MaxPool2d(kernel_size=3, stride=2)),
+
+                ('avgpool', nn.AdaptiveAvgPool2d((6, 6))),
+            ])
+        )
+
+        self.classifier = nn.Sequential(
+            OrderedDict([
+                ('flatten', nn.Flatten(1)),
+
+                ('fc1', nn.Linear(256 * 6 * 6, 4096)),
+                ('bn6', nn.BatchNorm1d(4096)),
+                ('relu6', nn.ReLU(inplace=True)),
+
+                ('fc2', nn.Linear(4096, 4096)),
+                ('bn7', nn.BatchNorm1d(4096)),
+                ('relu7', nn.ReLU(inplace=True)),
+            
+                ('fc3', nn.Linear(4096, NUM_CLASSES[dataset])),
+            ])
+        )
+
+        if not use_bn:
+            for name in list(self.base._modules.keys()):
+                if 'bn' in name:
+                    del self.base._modules[name]
+            for name in list(self.classifier._modules.keys()):
+                if 'bn' in name:
+                    del self.classifier._modules[name]
 
 MODELS = {
     "avgcnn": FedAvgCNN,
+    "alex": AlexNet,
+    "lenet5": LeNet5,
+    "myalex": MyAlexNet,
     "simplecnn": SimpleCNN,
     "res18": partial(ResNet, version="18"),
     "res34": partial(ResNet, version="34"),

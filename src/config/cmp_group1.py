@@ -6,7 +6,7 @@ class ExperimentParams(BaseExperimentParams):
         # 基础参数
         self.num_clients = 50
         self.num_rounds = None
-        self.local_rounds = 1
+        self.local_rounds = 5
         self.sim_time = 600000
         self.server_lr = 1.0  # 通常设为1.0直接使用客户端更新
         self.buffer_size = 10
