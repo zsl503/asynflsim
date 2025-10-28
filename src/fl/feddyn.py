@@ -1,7 +1,4 @@
-# t2是要33行时间系数不要50行（），t3是不要33行时间系数要50行（非常平稳，但是精度不及其它，比fedbuff好），t4是33行和105行时间系数不要50行（后期乏力）
 import copy
-import logging
-import math
 import torch
 import torch.nn.functional as F
 

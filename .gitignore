@@ -1,13 +1,5 @@
 output
 /data
 *.pyc
-.bak
-src/fl/history_try
-src/config/.bak
-*.ipynb
-Record.md
-xuls_output/* 
-*.png
 *.pyc
-src/config/user
 */__pycache__

@@ -5,7 +5,7 @@ class DatasetArgs:
 
 class BaseExperimentParams:
     def __init__(self):
-        self.use_sample_weight = True
+        pass
 
     def __str__(self):
         # Get the dictionary of attributes (including those from subclasses)
