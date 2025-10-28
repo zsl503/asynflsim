@@ -1,6 +1,6 @@
-# AsynFL — 异步联邦学习仿真框架
+# AsynFLSim — 异步联邦学习仿真框架
 
-这是一个用于研究和仿真异步联邦学习（Asynchronous Federated Learning，AsynFL）的 Python 框架。它提供多种联邦学习算法实现、数据分割/生成工具、可视化与记录器，方便开展算法对比、非IID 分布生成及实验复现。
+这是一个用于研究和仿真异步联邦学习（Asynchronous Federated Learning Simulation，AsynFLSim）的 Python 框架。它提供多种联邦学习算法实现、数据分割/生成工具、可视化与记录器，方便开展算法对比、非IID 分布生成及实验复现。
 
 ## 主要功能
 - 多种联邦学习算法实现（详见 `src/fl/`）：如 FedAvg、FedAsync、FedBuff、FedProx、FedDyn 及若干变体/改进算法。
