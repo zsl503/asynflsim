@@ -8,8 +8,12 @@ from pathlib import Path
 import numpy as np
 from matplotlib import pyplot as plt
 from PIL import Image
-
-from .datasets import FEMNIST, CelebA, Synthetic
+import requests
+import zipfile
+import io
+import csv
+import re
+from .datasets import FEMNIST, CelebA, Synthetic, Sent140
 
 DATA_ROOT = Path(__file__).parent.parent.absolute()
 
@@ -82,6 +86,159 @@ def prune_args(args: Namespace) -> dict:
             args_dict["monitor_window_name_suffix"] += f"-semantic"
     args_dict["monitor_window_name_suffix"] += f"-seed{args.seed}"
     return args_dict
+
+def _simple_tokenize(text):
+    # very light-weight tokenizer: lowercase, remove URLs/mentions, split on whitespace and punctuation
+    text = text.lower()
+    text = re.sub(r"http\S+", "", text)  # remove urls
+    text = re.sub(r"www\.[^\s]+", "", text)
+    text = re.sub(r"@[A-Za-z0-9_]+", "", text)  # remove mentions
+    text = re.sub(r"[^0-9a-z\s']", " ", text)  # keep letters, numbers, apostrophe
+    tokens = [t for t in text.split() if t]
+    return tokens
+
+def process_sent140(args, partition, stats):
+    """
+    Download + preprocess Sentiment140 and produce:
+      - data.npy (N, max_len) int64
+      - targets.npy (N,) int64
+      - vocab.json (token->idx mapping)
+
+    Uses args:
+      args.sent140_max_len (default 50)
+      args.vocab_size (default 20000)
+    """
+    max_len = getattr(args, "sent140_max_len", 50)
+    vocab_size = getattr(args, "vocab_size", 20000)
+
+    sent_root = DATA_ROOT / "sent140"
+    sent_root.mkdir(parents=True, exist_ok=True)
+
+    try:
+        from src.utils.data.datasets import Sent140
+        _ = Sent140(
+            root=sent_root,
+            args=args,
+            test_data_transform=None,
+            test_target_transform=None,
+            train_data_transform=None,
+            train_target_transform=None,
+        )
+        print(f"Sent140 dataset class found and data loaded from {sent_root}")
+        return _
+    
+    except Exception:
+        print("Sent140 dataset class not found, proceeding to download and preprocess data...")
+
+    zip_url = "http://cs.stanford.edu/people/alecmgo/trainingandtestdata.zip"
+    training_csv_name = "training.1600000.processed.noemoticon.csv"
+    csv_path = sent_root / training_csv_name
+
+    # 下载并解压（如果 CSV 已存在则跳过）
+    if not csv_path.exists():
+        print("Downloading Sentiment140 dataset (trainingandtestdata.zip)...")
+        r = requests.get(zip_url, timeout=120)
+        r.raise_for_status()
+        z = zipfile.ZipFile(io.BytesIO(r.content))
+        # 提取 training CSV
+        found = False
+        for name in z.namelist():
+            if name.endswith(training_csv_name):
+                z.extract(name, path=sent_root)
+                extracted = sent_root / name
+                # 如果解压出带文件夹，移动到 sent_root 根目录
+                if extracted.parent != sent_root:
+                    extracted.rename(csv_path)
+                    try:
+                        extracted.parent.rmdir()
+                    except Exception:
+                        pass
+                found = True
+                break
+        if not found:
+            raise RuntimeError("Sent140 zip downloaded but training CSV not found inside.")
+
+    # 解析 CSV: 格式 polarity,id,date,query,user,text
+    texts, labels = [], []
+    with open(csv_path, "r", encoding="latin-1") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            if len(row) < 6:
+                continue
+            try:
+                polarity = int(row[0])
+            except Exception:
+                continue
+            text = row[5]
+            label = 1 if polarity == 4 else 0  # 4 -> positive -> 1, 0 -> negative -> 0
+            texts.append(text)
+            labels.append(label)
+
+    if len(texts) == 0:
+        raise RuntimeError("No sentences found when processing Sent140.")
+
+    # 建词汇表（global），保留 top (vocab_size-2)，0 PAD, 1 UNK
+    token_counter = Counter()
+    for t in texts:
+        token_counter.update(_simple_tokenize(t))
+
+    def text_to_seq(text, vocab):
+        tokens = _simple_tokenize(text)
+        seq = [vocab.get(t, 1) for t in tokens]  # 未知用 1
+        if len(seq) >= max_len:
+            return seq[:max_len]
+        else:
+            return seq + [0] * (max_len - len(seq))
+        
+    if not os.path.exists(sent_root / "vocab.json"):
+        most_common = token_counter.most_common(max(0, vocab_size - 2))
+        vocab = {w: i + 2 for i, (w, _) in enumerate(most_common)}
+        vocab["<PAD>"] = 0
+        vocab["<UNK>"] = 1
+
+        with open(sent_root / "vocab.json", "w", encoding="utf-8") as f:
+            json.dump(vocab, f, ensure_ascii=False, indent=2)
+    else:
+        with open(sent_root / "vocab.json", "r", encoding="utf-8") as f:
+            vocab = json.load(f)
+
+    all_seqs = np.stack([np.array(text_to_seq(t, vocab), dtype=np.int64) for t in texts], axis=0)
+    all_labels = np.array(labels, dtype=np.int64)
+    # 划分 train/val/test
+    n = len(all_seqs)
+    test_size = int(n * getattr(args, "test_ratio", 0.1))
+    val_size = int(n * getattr(args, "val_ratio", 0.1))
+    print(f"Total samples: {n}, test: {test_size}, val: {val_size}, train: {n - test_size - val_size}")
+    train_size = n - test_size - val_size
+
+    indices = np.arange(n)
+    np.random.shuffle(indices)
+
+    train_idx = indices[:train_size]
+    val_idx = indices[train_size: train_size + val_size]
+    test_idx = indices[train_size + val_size:]
+
+    train_data, train_targets = all_seqs[train_idx], all_labels[train_idx]
+    val_data, val_targets = all_seqs[val_idx], all_labels[val_idx]
+    test_data, test_targets = all_seqs[test_idx], all_labels[test_idx]
+    # 保存文件
+    np.save(sent_root / "train", train_data)
+    np.save(sent_root / "train_targets", train_targets)
+    np.save(sent_root / "val", val_data)
+    np.save(sent_root / "val_targets", val_targets)
+    np.save(sent_root / "test", test_data)
+    np.save(sent_root / "test_targets", test_targets)
+
+    print(f"Saved processed Sent140 to {sent_root}")
+    from src.utils.data.datasets import Sent140
+    return Sent140(
+        root=sent_root,
+        args=args,
+        test_data_transform=None,
+        test_target_transform=None,
+        train_data_transform=None,
+        train_target_transform=None,
+    )
 
 
 def process_femnist(args, partition: dict, stats: dict):

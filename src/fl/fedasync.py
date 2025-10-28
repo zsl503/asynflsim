@@ -53,6 +53,19 @@ class FedAsyncClient(BaseClient):
     def __init__(self, client_id, base_model, data_loaders, recorder, params, speed_factor):
         super().__init__(client_id, base_model, data_loaders, recorder, params, speed_factor)
 
+    def send_to_server(self, server):
+        # 上传前注册
+        self.registration(server)
+        # 上传参数
+        with server.res.request() as req:
+            yield req
+            server.recv_msg((self.model.state_dict(), len(self.train_data_loader.dataset), self.client_id, self.model_version))
+
+
+    def recv_from_server(self, server):
+        self.model_version, state_dict = server.send_msg(self.client_id)
+        self.model.load_state_dict(state_dict)
+
     def _client_process(self, server: BaseServer):
         # ========== 等待阶段 ==========
         idle_begin_time = server.env.now
@@ -64,14 +77,14 @@ class FedAsyncClient(BaseClient):
             model_version = self.model_version,
             speed_factor=self.speed_factor
         )
+        
         yield self.wakeup_event
         # 网络延迟
         if self.params.use_random_delay:
-            yield server.env.timeout(random.random()/10)
+            yield server.env.timeout(1)
 
         # ========== 下载阶段 ==========
-        self.model_version, state_dict = server.send_msg(self.client_id)
-        self.model.load_state_dict(state_dict)
+        self.recv_from_server(server)
         self.recorder.record_client_status(
             server.env.now,
             self.client_id,
@@ -80,10 +93,11 @@ class FedAsyncClient(BaseClient):
             model_version = server.model_version,
             speed_factor=self.speed_factor
         )
-        real_idle_time = server.env.now - idle_begin_time
+        real_idle_time = server.env.now - idle_begin_time  # 实际耗时（秒）
         self.recorder.record_waiting_time(self.client_id, real_idle_time)
         
         # ========== 训练阶段 ==========
+        # 开始训练
         self.recorder.record_client_status(
             server.env.now, 
             self.client_id,
@@ -94,22 +108,13 @@ class FedAsyncClient(BaseClient):
         )
         
         # 执行本地训练并获取真实时间
+        self.initial_state = copy.deepcopy(self.model.state_dict())
+        
         train_time = self.local_train_with_time()
-        
-        logging.info(f"Client {self.client_id} train time: {train_time}, factor: {self.speed_factor}, mode: {self.params.speed_mode}")
-        
+        logging.info(f"Client {self.client_id} train time: {train_time}, factor: {self.speed_factor}, mode: {self.params.speed_mode}")        
         self.recorder.record_training_time(self.client_id, train_time)
-        # delta = {}
-        # for k in initial_state:
-        #     delta[k] = initial_state[k] - self.model.state_dict()[k]
         yield server.env.timeout(train_time)
-
-        # 上传前注册
-        self.registration(server)
-        # 上传参数
-        with server.res.request() as req:
-            yield req
-            server.recv_msg((self.model.state_dict(), len(self.train_data_loader.dataset), self.client_id, self.model_version))
+        yield from self.send_to_server(server)
 
 Client = FedAsyncClient
 Server = FedAsyncServer 

@@ -287,6 +287,93 @@ class MyAlexNet(DecoupledModel):
                 if 'bn' in name:
                     del self.classifier._modules[name]
 
+class MLP(nn.Module):
+    def __init__(self,
+                 dataset: str):
+        super(MLP, self).__init__()
+        infeat = 1
+        for _ in range(len(DATA_SHAPE[dataset])):
+            infeat *= DATA_SHAPE[dataset][_] 
+        self.model = nn.Sequential(
+                        nn.Linear(infeat, 200),
+                        nn.ReLU(inplace=True),
+                        nn.Linear(200, 100),
+                        nn.ReLU(inplace=True),
+                        nn.Linear(100, NUM_CLASSES[dataset]),
+                        # nn.LogSoftmax(dim=1),
+        )
+
+    def forward(self, x):
+        x = x.view(x.size(0), -1)
+        # print(f"Input shape: {x.shape}")
+        return self.model(x)
+
+class LSTMModel(nn.Module):
+    def __init__(self, dataset: str, vocab_size: int = 20000, embed_dim: int = 128, hidden_dim: int = 128, num_layers: int = 2, bidirectional: bool = False, dropout: float = 0):
+    # def __init__(self, hidden_size, embedding_dim, vocab_size):
+        super(LSTMModel, self).__init__() # 调用父类的构造方法
+        self.num_classes = NUM_CLASSES[dataset]
+        self.embedding = nn.Embedding(vocab_size, embed_dim) # vocab_size词汇表大小， embedding_dim词嵌入维度
+        self.encoder = nn.LSTM( input_size=embed_dim, 
+                                hidden_size=hidden_dim, 
+                                num_layers=num_layers,
+                                batch_first=True,
+                                bidirectional=bidirectional,
+                                dropout=dropout if num_layers > 1 else 0.0
+                               )
+        self.predictor = nn.Linear(hidden_dim, self.num_classes) # 全连接层
+        
+    def forward(self, seq):
+        output, (hidden, cell) = self.encoder(self.embedding(seq))
+        # output :  torch.Size([24, 32, 100])
+        # hidden :  torch.Size([1, 32, 100])
+        # cell :  torch.Size([1, 32, 100])
+        out, _ = torch.max(output, dim=1)
+        preds = self.predictor(out) 
+        return preds
+
+
+class RNN(nn.Module):
+    def __init__(self, dataset: str, vocab_size = 20000, embed_dim=128, hidden_dim=256, padding_idx=0):
+        super(RNN, self).__init__()
+        self.num_classes = NUM_CLASSES[dataset]
+        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=padding_idx)
+        # Simple RNN
+        self.rnn = nn.RNN(embed_dim, hidden_dim, batch_first=True)
+        # 分类器
+        self.fc = nn.Linear(hidden_dim, self.num_classes)
+
+    def forward(self, x):
+        """
+        x: (batch, seq_len)
+        """
+        # Embedding
+        emb = self.embedding(x)  # (batch, seq_len, embed_dim)
+        # RNN
+        out, _ = self.rnn(emb)  # (batch, seq_len, hidden_dim)
+        out, _ = torch.max(out, dim=1)  # (batch, hidden_dim)
+        # 分类
+        logits = self.fc(out)
+        return logits
+
+class AvgWordEmbClassifier(nn.Module):
+    def __init__(self, dataset: str, vocab_size=20000, embed_dim=256):
+        super(AvgWordEmbClassifier, self).__init__()
+        self.num_classes = NUM_CLASSES[dataset]
+        self.embedding = nn.Embedding(vocab_size, embed_dim)
+        
+        # 线性分类器 (相当于 Logistic Regression)
+        self.fc = nn.Linear(embed_dim, self.num_classes)
+
+    def forward(self, x):
+        """
+        x: [batch_size, seq_len]
+        """
+        emb = self.embedding(x)              # [batch, seq_len, embed_dim]
+        avg_emb = emb.mean(dim=1)            # 平均池化 -> [batch, embed_dim]
+        logits = self.fc(avg_emb)            # [batch, num_classes]
+        return logits
+
 MODELS = {
     "avgcnn": FedAvgCNN,
     "alex": AlexNet,
@@ -297,5 +384,9 @@ MODELS = {
     "res34": partial(ResNet, version="34"),
     "res50": partial(ResNet, version="50"),
     "res101": partial(ResNet, version="101"),
-    "res152": partial(ResNet, version="152")
+    "res152": partial(ResNet, version="152"),
+    "mlp": MLP,
+    "lstm": LSTMModel,
+    "rnn": RNN,
+    "avgwordemb": AvgWordEmbClassifier,
 }

@@ -37,7 +37,6 @@ def fix_random_seed(seed: int) -> None:
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-
 def interrupt_handler(env, stop_event, process):
     yield stop_event
     process.interrupt()
@@ -72,7 +71,14 @@ def main(params:BaseExperimentParams, output_dir:str):
         args = params.dataset_args,
         center_test=True
     )
-
+    print(f"Test dataset samples: {len(test_dataset)}")
+    # 输出测试集中各标签数量
+    # if hasattr(test_dataset, 'total_targets'):
+    # print(len(test_dataset.dataset.test_targets))
+    unique, counts = np.unique(test_dataset.dataset.test_targets, return_counts=True)
+    label_counts = dict(zip(unique.tolist(), counts.tolist()))
+    print(f"Test dataset label distribution: {label_counts}")
+    # return
     # 初始化模型
     global_model = MODELS[params.model_name](dataset = params.dataset_name).to(params.device)
     # 输出模型所有层名称、参数数据类型和参数的形状
@@ -98,9 +104,9 @@ def main(params:BaseExperimentParams, output_dir:str):
             client_id=i,
             base_model=global_model,
             data_loaders = (
-                DataLoader(train_client_datasets[i], batch_size=params.batch_size, shuffle=True, drop_last=True),
-                DataLoader(val_client_datasets[i], batch_size=params.batch_size, shuffle=True, drop_last=True) if len(val_client_datasets[i]) else None,
-                DataLoader(test_client_datasets[i], batch_size=params.batch_size, shuffle=True, drop_last=True) if len(test_client_datasets[i]) else None,
+                DataLoader(train_client_datasets[i], batch_size=params.batch_size, shuffle=True, drop_last=False),
+                DataLoader(val_client_datasets[i], batch_size=params.batch_size, shuffle=True, drop_last=False) if len(val_client_datasets[i]) else None,
+                DataLoader(test_client_datasets[i], batch_size=params.batch_size, shuffle=True, drop_last=False) if len(test_client_datasets[i]) else None,
                 ),
             recorder=recorder, 
             params=params,
@@ -183,7 +189,8 @@ def gen_speed_factor(data_dir, lda=0.01, output_dir=None):
     """
     json_file = os.path.join(data_dir, 'all_stats.json')
     stats = json.load(open(json_file, 'r'))
-    stats.pop('sample per client')
+    if 'sample per client' in stats:
+        stats.pop('sample per client')
 
     speeds = []
     for k, v in stats.items():

@@ -1,6 +1,5 @@
 import logging
 import torch
-import random
 
 from .base import BaseServer
 from .fedbuff import FedBuffClient
@@ -16,16 +15,16 @@ class FedAvgServer(BaseServer):
         super().__init__(model, test_loader, recorder, params)
         
         # 动态缓冲区管理
-        self.selected_clients = []
+        self.selected_clients = set()
         self.num_clients = self.params.num_clients
-        self.select_num = int(self.num_clients * self.params.participation_ratio)
 
     def recv_msg(self, msg):
-        (_, _, client_id, _) = msg
+        (delta, _, client_id, _) = msg
         if client_id not in self.selected_clients:
             logging.info(f"Warning: Unexpected update from client {client_id}. Selected {self.selected_clients}")
             return
-        self.selected_clients.remove(client_id)        
+        
+        self.selected_clients.remove(client_id)
         self.buffer.append(msg)
         logging.info(f"[Client {client_id}] Update uploaded ({len(self.buffer)}/{self.buffer_size}) at {self.env.now:.2f}s")
         self.recorder.record_buffer_update(
@@ -39,12 +38,19 @@ class FedAvgServer(BaseServer):
         # 检查缓冲区并聚合
         if not self.aggregation_trigger.triggered:
             self.aggregation_trigger.succeed()
-        
+    
+    def send_msg(self, client_id):
+        ''' 默认返回全局模型，此处没有深拷贝，请注意使用 '''
+        state_dict = self.global_model.state_dict()
+        # 计算发送数据大小
+        return (self.model_version, state_dict)
+
     def aggregate(self):
         """执行加权平均聚合"""
         total_samples = sum(samples for _, samples, _, _ in self.buffer)
         # 加权平均参数差异
         avg_delta = {}
+
         for key in self.global_model.state_dict().keys():
             layer_sum = torch.stack(
                 [delta[key].float() * samples for delta, samples, _, _ in self.buffer]
@@ -66,6 +72,8 @@ class FedAvgServer(BaseServer):
         self.recorder.record_aggregation(self.env.now, self.model_version)
         self.recorder.aggregation_times.append(self.env.now)
         self.check_stop_condition()
-        
+
+FedAvgClient = FedBuffClient
+
 Client = FedBuffClient
 Server = FedAvgServer

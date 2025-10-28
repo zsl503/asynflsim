@@ -13,6 +13,7 @@ from src.utils.data.process import (
     exclude_domain,
     plot_distribution,
     prune_args,
+    process_sent140,
     generate_synthetic_data,
     process_celeba,
     process_femnist,
@@ -25,8 +26,6 @@ from src.utils.data.schemes import (
     semantic_partition,
 )
 from src.utils.data.datasets import DATASETS, BaseDataset
-
-CURRENT_DIR = Path(__file__).parent.absolute()
 
 CURRENT_DIR = Path(__file__).parent.absolute()
 
@@ -54,6 +53,31 @@ def main(args):
         partition["val"] = []
     elif args.dataset == "synthetic":
         dataset = generate_synthetic_data(args, partition, stats)
+    elif args.dataset == "sent140":
+        dataset = process_sent140(args, partition, stats)
+        partition["val"] = []
+        print(f"dataset {dataset}")
+        # dataset = DATASETS[args.dataset](dataset_root, args)
+        targets = np.array(dataset.targets, dtype=np.int32)
+        label_set = set(range(len(dataset.classes)))
+        if args.iid:  # iid partition
+            iid_partition(
+                targets=targets,
+                label_set=label_set,
+                client_num=client_num,
+                partition=partition,
+                stats=stats,
+            )
+        elif args.alpha > 0:  # Dirichlet(alpha)
+            dirichlet(
+                targets=targets,
+                label_set=label_set,
+                client_num=client_num,
+                alpha=args.alpha,
+                least_samples=args.least_samples,
+                partition=partition,
+                stats=stats,
+            )
     else:  # MEDMNIST, COVID, MNIST, CIFAR10, ...
         # NOTE: If `args.ood_domains`` is not empty, then FL-bench will map all labels (class space) to the domain space
         # and partition data according to the new `targets` array.
@@ -161,6 +185,7 @@ def main(args):
         }
 
     if args.dataset not in ["femnist", "celeba"]:
+        print(f"split by {args.split}, partition: {partition['separation']}")
         if args.split == "sample":
             for client_id in partition["separation"]["train"]:
                 indices = partition["data_indices"][client_id]
@@ -333,6 +358,10 @@ if __name__ == "__main__":
 
     # For domain generalization datasets only
     parser.add_argument("--ood_domains", nargs="+", default=None)
+
+    # For sent140 only
+    parser.add_argument("--sent140_max_len", type=int, default=50)
+    parser.add_argument("--vocab_size", type=int, default=20000)
 
     # For semantic partition only
     parser.add_argument("-sm", "--semantic", type=int, default=0)

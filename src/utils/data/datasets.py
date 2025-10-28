@@ -52,6 +52,49 @@ class BaseDataset(Dataset):
     def __len__(self):
         return len(self.total_targets)
 
+class Sent140(BaseDataset):
+    def __init__(
+        self,
+        root,
+        args=None,
+        test_data_transform=None,
+        test_target_transform=None,
+        train_data_transform=None,
+        train_target_transform=None,
+    ):
+        super().__init__()
+        if not isinstance(root, Path):
+            root = Path(root)
+
+        # 这里假设你已经把数据处理成了 data.npy 和 targets.npy
+        if not os.path.isfile(root / "train.npy") or not os.path.isfile(root / "train_targets.npy") \
+            or not os.path.isfile(root / "val.npy") or not os.path.isfile(root / "val_targets.npy") \
+                or not os.path.isfile(root / "test.npy") or not os.path.isfile(root / "test_targets.npy"):
+            raise RuntimeError(
+                "Please preprocess sent140 into data.npy and targets.npy first."
+            )
+
+        train_data = torch.from_numpy(np.load(root / "train.npy")).long()
+        self.test_data = torch.from_numpy(np.load(root / "test.npy")).long()
+        val_data = torch.from_numpy(np.load(root / "val.npy")).long()
+
+        train_targets = torch.from_numpy(np.load(root / "train_targets.npy")).long()
+        self.test_targets = torch.from_numpy(np.load(root / "test_targets.npy")).long()
+        val_targets = torch.from_numpy(np.load(root / "val_targets.npy")).long()
+        
+        self.data = torch.cat([train_data, val_data, self.test_data])
+        self.total_targets = torch.cat([train_targets, val_targets, self.test_targets])
+        # 转成 tensor
+        if not args.global_test:
+            self.targets = self.total_targets
+        else:
+            self.targets = train_targets
+
+        self.classes = [0, 1]  # 二分类：0=negative, 1=positive
+        self.test_data_transform = test_data_transform
+        self.test_target_transform = test_target_transform
+        self.train_data_transform = train_data_transform
+        self.train_target_transform = train_target_transform
 
 class FEMNIST(BaseDataset):
     def __init__(
@@ -645,4 +688,5 @@ DATASETS = {
     "tiny_imagenet": TinyImagenet,
     "cinic10": CINIC10,
     "domain": DomainNet,
+    "sent140": Sent140,
 }

@@ -24,6 +24,8 @@ class BaseServer:
         self.model_version = 0
         self.env:Environment = None
         self.stop_event:Event = None
+
+        self.stop_type = self.params.stop_type if hasattr(self.params, 'stop_type') else 'rounds'
         
         self.test_loader = test_loader
         self.criterion = torch.nn.CrossEntropyLoss()
@@ -61,7 +63,7 @@ class BaseServer:
             log_str = f"[Round {self.aggregation_count}] Aggregation completed at {self.env.now:.2f}s. Acc {accuracy:.4f} Loss {loss:.4f}. Total staleness: {self.total_staleness}, avg staleness: {self.total_staleness / self.client_update_count:.2f}"
             logging.info(log_str)
             print(log_str)
-            self.recorder.record_validation(accuracy, loss, self.aggregation_count, self.env.now)
+            self.recorder.record_validation(accuracy, loss, self.aggregation_count, self.client_update_count, self.env.now)
             return accuracy, loss
         return None, None
 
@@ -166,8 +168,17 @@ class BaseServer:
         raise NotImplementedError
 
     def check_stop_condition(self):
-        if self.aggregation_count >= self.params.num_rounds:
-            self.stop_event.succeed()
+        if self.stop_type == 'rounds':
+            if self.aggregation_count >= self.params.num_rounds:
+                self.stop_event.succeed()
+        elif self.stop_type == 'time':
+            if self.env.now >= self.params.max_time:
+                self.stop_event.succeed()
+        elif self.stop_type == 'update':
+            if self.client_update_count >= self.params.max_updates:
+                self.stop_event.succeed()
+        else:
+            raise ValueError(f"Unknown stop condition: {self.stop_type}")
 
     def validate(self):
         self.global_model.eval()
@@ -255,14 +266,45 @@ class BaseClient:
 
     def minibatch_local_train(self):
         self.model.train()
-        for _ in range (self.params.local_rounds):
-            for images, labels in self.train_data_loader:
+        # 增加每个 mini-batch 的日志，用于调试本地训练
+        # log_every = getattr(self.params, 'log_batch_every', 10)
+        for epoch in range(self.params.local_rounds):
+            batch_losses = []
+            batch_accs = []
+            for batch_idx, (images, labels) in enumerate(self.train_data_loader):
                 images, labels = images.to(self.device), labels.to(self.device)
                 self.optimizer.zero_grad()
                 outputs = self.model(images)
                 loss = F.cross_entropy(outputs, labels)
                 loss.backward()
                 self.optimizer.step()
+
+                # 记录 batch loss 和 batch accuracy
+                with torch.no_grad():
+                    preds = outputs.argmax(dim=1)
+                    correct = preds.eq(labels).sum().item()
+                    acc = correct / labels.size(0) if labels.size(0) > 0 else 0.0
+
+                batch_losses.append(loss.item())
+                batch_accs.append(acc)
+
+                # 每隔若干 batch 打印一次，既有 logging 也有 stdout 输出，便于观察
+                # if (batch_idx + 1) % log_every == 0:
+                #     avg_loss = sum(batch_losses[-log_every:]) / min(len(batch_losses), log_every)
+                #     avg_acc = sum(batch_accs[-log_every:]) / min(len(batch_accs), log_every)
+                #     msg = (f"Client {self.client_id} LocalEpoch {epoch+1}/{self.params.local_rounds} "
+                #            f"Batch {batch_idx+1}/{len(self.train_data_loader)} Loss {avg_loss:.4f} Acc {avg_acc:.4f}")
+                #     logging.info(msg)
+                #     print(msg)
+
+            # 每个本地 epoch 结束时打印该 epoch 的平均 loss/acc
+            # if len(batch_losses) > 0:
+            #     epoch_loss = sum(batch_losses) / len(batch_losses)
+            #     epoch_acc = sum(batch_accs) / len(batch_accs)
+            #     epoch_msg = (f"Client {self.client_id} Finished LocalEpoch {epoch+1}/{self.params.local_rounds} "
+            #                  f"AvgLoss {epoch_loss:.4f} AvgAcc {epoch_acc:.4f}")
+            #     logging.info(epoch_msg)
+            #     print(epoch_msg)
 
     def fullbatch_local_train(self):
         self.model.train()

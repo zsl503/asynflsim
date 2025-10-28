@@ -65,12 +65,15 @@ class SimulationRecorder:
     def record_waiting_time(self, client_id, duration):
         self.client_metrics[client_id]['wait_time'] += duration
         
-    def record_validation(self, accuracy, loss, current_round, time):
+    def record_validation(self, accuracy, loss, current_round, update_cnt, time):
         self.writer.add_scalar('Validation-Round/Accuracy', accuracy, current_round)
         self.writer.add_scalar('Validation-Round/Loss', loss, current_round)
 
         self.writer.add_scalar('Validation-Time(ms)/Accuracy', accuracy, time*1000)
         self.writer.add_scalar('Validation-Time(ms)/Loss', loss, time*1000)
+
+        self.writer.add_scalar('Validation-Update/Accuracy', accuracy, update_cnt)
+        self.writer.add_scalar('Validation-Update/Loss', loss, update_cnt)
 
     def record_overhead(self, time, current_round, recv_byte, send_byte, accuracy, loss):
         send_GB = send_byte / 1073741824 # 1024*1024*1024

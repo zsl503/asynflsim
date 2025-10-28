@@ -130,6 +130,7 @@ NUM_CLASSES = {
     "tiny_imagenet": 200,
     "synthetic": _get_synthetic_args().get("class_num", 0),
     "domain": _get_domainnet_args().get("class_num", 0),
+    "sent140": 2
 }
 
 

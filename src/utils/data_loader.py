@@ -41,7 +41,7 @@ class BaseDataset(Dataset):
 
 class DataHandler:
     @staticmethod
-    def load_data(dataset_name:str, file_dir, args = None, center_test = False):
+    def load_data(dataset_name:str, file_dir, args = None, center_test = False) -> Subset | tuple[list[Subset], list[Subset], list[Subset]]:
         dataset_name = dataset_name.lower()
         # if dataset_name == "cifar10":
         #     train_client_datasets, val_client_datasets, test_client_datasets = \
@@ -96,7 +96,7 @@ class DataHandler:
         )
 
     @staticmethod
-    def get_client_dataset(dataset_name, file_dir, args = None) -> BaseDataset:
+    def get_client_dataset(dataset_name, file_dir, args = None) -> tuple[list[Subset], list[Subset], list[Subset]]:
         """Load FL dataset and partitioned data indices of clients.
 
         Raises:
@@ -130,12 +130,11 @@ class DataHandler:
             train_client_datasets.append(Subset(dataset, indices["train"]))
             val_client_datasets.append(Subset(dataset, indices["val"]))
             test_client_datasets.append(Subset(dataset, indices["test"]))
-
         return train_client_datasets, val_client_datasets, test_client_datasets
     
 
     @staticmethod
-    def get_global_test_dataset(dataset_name, file_dir, args = None) -> BaseDataset:
+    def get_global_test_dataset(dataset_name, file_dir, args = None) -> Subset:
         """Load FL dataset and partitioned data indices of clients.
 
         Raises:
@@ -159,5 +158,5 @@ class DataHandler:
             args=args,
             **DataHandler.get_dataset_transforms(dataset_name),
         )
-        test_indices = list(range(len(dataset.targets), len(dataset.data)))
+        test_indices = list(range(0, len(dataset.test_targets)))
         return Subset(dataset, test_indices)
